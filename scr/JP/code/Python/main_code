@@ -1,99 +1,62 @@
-#include <Bluepad32.h>
+#include <PS4Controller.h>
 #include <ESP32Servo.h>
 
-// ====== Pins ======
-#define ESC_PIN 14
-#define STEERING_PIN 27
-#define TRIG_PIN 32
-#define ECHO_PIN 33
+// Definieer de pinnen
+const int servoPin = 13; // Oranje draad van de servo
+const int motorPin = 12; // Witte draad van de motordriver
 
-// ====== ESC values ======
-#define ESC_NEUTRAL 1500
-#define ESC_FORWARD_MAX 1900
-#define ESC_REVERSE_MAX 1100
-
-ControllerPtr myController;
-Servo esc;
-Servo steering;
-
-// ====== Distance Function ======
-float getDistanceCM() {
-
-    digitalWrite(TRIG_PIN, LOW);
-    delayMicroseconds(2);
-
-    digitalWrite(TRIG_PIN, HIGH);
-    delayMicroseconds(10);
-    digitalWrite(TRIG_PIN, LOW);
-
-    long duration = pulseIn(ECHO_PIN, HIGH, 25000); // 25ms timeout
-
-    float distance = duration * 0.034 / 2.0;
-    return distance;
-}
-
-// ====== Controller Callbacks ======
-void onConnectedController(ControllerPtr ctl) {
-    myController = ctl;
-}
-
-void onDisconnectedController(ControllerPtr ctl) {
-    myController = nullptr;
-}
+Servo stuurServo;
+Servo gasMotor;
 
 void setup() {
-    Serial.begin(115200);
+  Serial.begin(115200);
 
-    esc.attach(ESC_PIN);
-    steering.attach(STEERING_PIN);
+  // Koppel de servo's aan de pinnen
+  stuurServo.attach(servoPin);
+  gasMotor.attach(motorPin);
 
-    pinMode(TRIG_PIN, OUTPUT);
-    pinMode(ECHO_PIN, INPUT);
+  // Startpositie: Wielen recht (90), Motor stil (90)
+  stuurServo.write(90);
+  gasMotor.write(90);
 
-    esc.writeMicroseconds(ESC_NEUTRAL);
-    delay(3000);
-
-    BP32.setup(&onConnectedController, &onDisconnectedController);
+  // VERVANG DIT door het MAC-adres dat je eerder hebt gevonden!
+  PS4.begin("94:51:dc:4c:6e:a6"); 
+  
+  Serial.println("Klaar voor verbinding...");
 }
 
 void loop() {
+  if (PS4.isConnected()) {
+    
+    // --- STUREN (Linker Joystick X-as) ---
+    // De joystick geeft -127 tot 127. We mappen dit naar 45-135 graden voor veilig sturen.
+    int stuurWaarde = PS4.LStickX();
+    int servoHoek = map(stuurWaarde, -127, 127, 45, 135); 
+    stuurServo.write(servoHoek);
 
-    BP32.update();
+    // --- GAS EN REM (R2 en L2) ---
+    int gasInput = PS4.R2Value();    // 0 tot 255
+    int remInput = PS4.L2Value();    // 0 tot 255
+    int motorOutput = 90;            // Standaard stilstand
 
-    float distance = getDistanceCM();
-
-    if (myController && myController->isConnected()) {
-
-        int r2 = myController->throttle();  // 0–1023
-        int l2 = myController->brake();     // 0–1023
-
-        int escSignal = ESC_NEUTRAL;
-
-        // ===== FORWARD =====
-        if (r2 > 20) {
-
-            if (distance > 15 || distance == 0) {
-                escSignal = map(r2, 0, 1023, ESC_NEUTRAL, ESC_FORWARD_MAX);
-            } else {
-                escSignal = ESC_NEUTRAL;  // AUTO BRAKE
-            }
-
-        }
-        // ===== REVERSE =====
-        else if (l2 > 20) {
-            escSignal = map(l2, 0, 1023, ESC_NEUTRAL, ESC_REVERSE_MAX);
-        }
-        else {
-            escSignal = ESC_NEUTRAL;
-        }
-
-        esc.writeMicroseconds(escSignal);
-
-        // ===== STEERING =====
-        int joyX = myController->axisX();
-        int steerAngle = map(joyX, -512, 512, 45, 135);
-        steering.write(steerAngle);
+    if (gasInput > 10) {
+      // Vooruit: van 90 (stil) naar 180 (vol gas)
+      motorOutput = map(gasInput, 0, 255, 90, 125);
+    } 
+    else if (remInput > 10) {
+      // Achteruit: van 90 (stil) naar 0 (vol achteruit)
+      motorOutput = map(remInput, 0, 255, 90, 0);
     }
 
-    delay(20);
+    gasMotor.write(motorOutput);
+
+    // Debugging (optioneel, zie je in de Seriële Monitor)
+    // Serial.printf("Stuur: %d | Motor: %d\n", servoHoek, motorOutput);
+    
+    delay(10); // Kleine pauze voor stabiliteit
+  } else {
+    // Als de verbinding wegvalt, zet alles stil voor de veiligheid
+    stuurServo.write(90);
+    gasMotor.write(90);
+  }
 }
