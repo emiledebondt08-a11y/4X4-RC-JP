@@ -91,7 +91,7 @@ void loop() {
 
         // ===== STEERING =====
         int joyX = myController->axisX();
-        int steerAngle = map(joyX, -512, 512, 45, 135);
+        int steerAngle = map(joyX, 512, -512, 45, 135);
         steering.write(steerAngle);
     }
 
